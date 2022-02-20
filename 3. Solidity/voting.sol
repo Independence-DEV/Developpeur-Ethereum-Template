@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0
-pragma solidity 0.8.11;
+pragma solidity 0.8.12;
 
-import "https://github.com/OpenZeppelin/openzeppelin-contracts/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract Voting is Ownable{
     uint256 public winningProposalId;
@@ -16,7 +16,7 @@ contract Voting is Ownable{
         uint voteCount;
     }
     Proposal[] public proposalList;
-    mapping(address=> Voter) public _whitelist;
+    mapping(address=> Voter) public whitelist;
 
     enum WorkflowStatus {
         RegisteringVoters,
@@ -26,66 +26,47 @@ contract Voting is Ownable{
         VotingSessionEnded,
         VotesTallied
     }
-    WorkflowStatus public status;
+    WorkflowStatus public status = WorkflowStatus.RegisteringVoters;
 
     event VoterRegistered(address voterAddress); 
     event WorkflowStatusChange(WorkflowStatus previousStatus, WorkflowStatus newStatus);
     event ProposalRegistered(uint proposalId);
     event Voted (address voter, uint proposalId);
 
-    constructor() {
-        status = WorkflowStatus.RegisteringVoters;
-    }
-
-    function whitelist(address _address) public onlyOwner {
+    function whitelistVoter(address _address) public onlyOwner {
         require(status == WorkflowStatus.RegisteringVoters, "The registration is not open !");
-        require(!_whitelist[_address].isRegistered, "This address is already whitelisted !");
-        _whitelist[_address].isRegistered = true;
-        _whitelist[msg.sender].hasVoted = false;
+        require(!whitelist[_address].isRegistered, "This address is already whitelisted !");
+        whitelist[_address].isRegistered = true;
         emit VoterRegistered(_address);
     }
 
     function startProposalsRegistration() public onlyOwner {
-        WorkflowStatus previousStatus = status;
+        require(status == WorkflowStatus.RegisteringVoters, "Wrong previous status");
         status = WorkflowStatus.ProposalsRegistrationStarted;
-        emit WorkflowStatusChange(previousStatus, status);
+        emit WorkflowStatusChange(WorkflowStatus.RegisteringVoters, status);
     }
     function stopProposalsRegistration() public onlyOwner {
-        WorkflowStatus previousStatus = status;
+        require(status == WorkflowStatus.ProposalsRegistrationStarted, "Wrong previous status");
         status = WorkflowStatus.ProposalsRegistrationEnded;
-        emit WorkflowStatusChange(previousStatus, status);
+        emit WorkflowStatusChange(WorkflowStatus.ProposalsRegistrationStarted, status);
     }
     function startVotingSession() public onlyOwner {
-        WorkflowStatus previousStatus = status;
+        require(status == WorkflowStatus.ProposalsRegistrationEnded, "Wrong previous status");
         status = WorkflowStatus.VotingSessionStarted;
-        emit WorkflowStatusChange(previousStatus, status);
+        emit WorkflowStatusChange(WorkflowStatus.ProposalsRegistrationEnded, status);
     }
     function stopVotingSession() public onlyOwner {
-        WorkflowStatus previousStatus = status;
+        require(status == WorkflowStatus.VotingSessionStarted, "Wrong previous status");
         status = WorkflowStatus.VotingSessionEnded;
-        emit WorkflowStatusChange(previousStatus, status);
+        emit WorkflowStatusChange(WorkflowStatus.VotingSessionStarted, status);
     }
-    function tallyVotes() public onlyOwner {
-        require(proposalList.length > 0, "No proposal for this vote !");
-        WorkflowStatus previousStatus = status;
-        uint previousVoteCount = 0;
-        winningProposalId = 0;
-        for (uint i=0; i<proposalList.length; i++) {
-        if (proposalList[i].voteCount > previousVoteCount) {
-                winningProposalId = i;
-            }
-        }
+    function votesTallied() public onlyOwner {
+        require(status == WorkflowStatus.VotingSessionEnded, "Wrong previous status");
         status = WorkflowStatus.VotesTallied;
-        emit WorkflowStatusChange(previousStatus, status);
-    }
-
-    function getWinner() public view returns(string memory) {
-        require(status == WorkflowStatus.VotesTallied, "Voting not finish !");
-        return proposalList[winningProposalId].description;
-    }
-    
+        emit WorkflowStatusChange(WorkflowStatus.VotingSessionEnded, status);
+    }    
     function proposal(string memory _description) public {
-        require(_whitelist[msg.sender].isRegistered, "This address is not whitelisted !");
+        require(whitelist[msg.sender].isRegistered, "This address is not whitelisted !");
         require(status == WorkflowStatus.ProposalsRegistrationStarted, "The proposal session is not open !");
         Proposal memory newProposal;
         newProposal.description = _description;
@@ -95,13 +76,22 @@ contract Voting is Ownable{
     }
 
     function vote(uint _proposalId) public {
-        require(_whitelist[msg.sender].isRegistered, "This address is not whitelisted !");
-        require(!_whitelist[msg.sender].hasVoted, "You already voted !");
+        require(whitelist[msg.sender].isRegistered, "This address is not whitelisted !");
+        require(!whitelist[msg.sender].hasVoted, "You already voted !");
         require(status == WorkflowStatus.VotingSessionStarted, "The voting session is not open !");
         require(_proposalId <= (proposalList.length-1), "This proposal doesn't exist !");
-        _whitelist[msg.sender].hasVoted = true;
-        _whitelist[msg.sender].votedProposalId = _proposalId;
+        whitelist[msg.sender].hasVoted = true;
+        whitelist[msg.sender].votedProposalId = _proposalId;
         proposalList[_proposalId].voteCount++;
+        winningProposalId = 0;
+        if (proposalList[_proposalId].voteCount > proposalList[winningProposalId].voteCount) {
+            winningProposalId = _proposalId;
+        }
         emit Voted(msg.sender, _proposalId);
+    }
+
+    function getWinner() public view returns(string memory) {
+        require(status == WorkflowStatus.VotesTallied, "Voting not finish !");
+        return proposalList[winningProposalId].description;
     }
 }
